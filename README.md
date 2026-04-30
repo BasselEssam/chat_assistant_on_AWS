@@ -375,11 +375,11 @@ All costs are based on **us-east-1** on-demand pricing. Actual charges may vary 
 
 | Component | Detail | Rate | Amount | Cost |
 |-----------|--------|------|--------|------|
-| S3 Storage | ~250 MB (processed data + model) | $0.023/GB-month | 0.25 GB | $0.01 |
+| S3 Storage | ~1.15 GB (940 MB model + ~200 MB processed data) | $0.023/GB-month | 1.15 GB | $0.03 |
 | S3 PUT requests | Script upload, parquet writes | $0.005/1000 | ~500 | $0.00 |
 | S3 GET requests | EMR reads, EC2 model pull | $0.0004/1000 | ~200 | $0.00 |
 | Data transfer OUT | Model pull EC2←S3 (~1 GB GGUF) | $0.09/GB | 1 GB | $0.09 |
-| **Storage Subtotal** | | | | **$0.10** |
+| **Storage Subtotal** | | | | **$0.12** |
 
 ### Grand Total
 
@@ -388,7 +388,7 @@ All costs are based on **us-east-1** on-demand pricing. Actual charges may vary 
 | EMR Cluster (2 hrs) | $0.72 |
 | EC2 Deployment (1 hr) | $0.20 |
 | Storage & Transfer | $0.10 |
-| **Total Estimated** | **~$1.02** |
+| **Total Estimated** | **~$1.04** |
 
 > Note: Fine-tuning was performed **locally** — no cloud GPU costs were incurred. If fine-tuning were done on a cloud GPU instance (e.g. `g4dn.xlarge` at $0.526/hr), an additional ~$2–5 would apply depending on training duration.
 
