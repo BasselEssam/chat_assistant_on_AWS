@@ -387,7 +387,7 @@ All costs are based on **us-east-1** on-demand pricing. Actual charges may vary 
 |----------|------|
 | EMR Cluster (2 hrs) | $0.72 |
 | EC2 Deployment (1 hr) | $0.20 |
-| Storage & Transfer | $0.10 |
+| Storage & Transfer | $0.12 |
 | **Total Estimated** | **~$1.04** |
 
 > Note: Fine-tuning was performed **locally** — no cloud GPU costs were incurred. If fine-tuning were done on a cloud GPU instance (e.g. `g4dn.xlarge` at $0.526/hr), an additional ~$2–5 would apply depending on training duration.
