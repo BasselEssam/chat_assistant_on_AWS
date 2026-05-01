@@ -1,19 +1,5 @@
-###############################################################################
-# CISC 886 – Cloud Computing Project
 # Terraform Configuration: VPC, Subnets, IGW, Route Tables, Security Groups,
-#                          EC2 (g4dn.xlarge), S3 Bucket, IAM Roles for EMR
-#
-# IMPORTANT: Replace "q1abc" with your actual Queen's netID throughout.
-#            EMR cluster is created via AWS Console (not Terraform) because
-#            the EMR Terraform resource requires additional IAM permissions
-#            that may not be available on the shared account. 
-#
-# Usage:
-#   terraform init
-#   terraform plan -var="net_id=25phxp" -var="my_ip=41.218.155.142/32"
-#   terraform apply -var="net_id=25phxp" -var="my_ip=41.218.155.142/32"
-#   terraform destroy -var="net_id=25phxp" -var="my_ip=41.218.155.142/32"
-###############################################################################
+#                          EC2, S3 Bucket, IAM Roles for EMR
 
 terraform {
   required_version = ">= 1.5.0"
@@ -25,22 +11,21 @@ terraform {
   }
 }
 
-###############################################################################
+
 # VARIABLES
-###############################################################################
 
 variable "net_id" {
-  description = "Your Queen's netID prefix (e.g. q1abc). All resources will be prefixed with this."
+  description = "netID prefix. All resources will be prefixed with this."
   type        = string
 
   validation {
-    condition     = length(var.net_id) > 2
-    error_message = "net_id must be your Queen's netID (e.g. q1abc)."
+    condition     = length(var.net_id) > 5
+    error_message = "net_id must be your Queen's netID"
   }
 }
 
 variable "my_ip" {
-  description = "Your public IP in CIDR form for SSH access (e.g. 203.0.113.5/32). Find it at https://checkip.amazonaws.com"
+  description = "Public IP in CIDR form for SSH access."
   type        = string
 }
 
@@ -70,28 +55,26 @@ variable "emr_subnet_cidr" {
 }
 
 variable "ec2_instance_type" {
-  description = "EC2 instance type. m5.xlarge recommended for GPU-based LLM serving."
+  description = "EC2 instance type. m5.xlarge for LLM serving."
   type        = string
   default     = "m5.xlarge"
 }
 
 variable "ec2_ami" {
-  description = "AMI ID. Default is Ubuntu 22.04 LTS (ca-central-1). Update if using a different region."
+  description = "AMI ID."
   type        = string
-  # Ubuntu 22.04 LTS x86_64 – us-east-1 (verify latest at console.aws.amazon.com/ec2/v2/home#AMICatalog)
   default     = "ami-0c7217cdde317cfec"
-  # default     = "ami-0da9ffeb885463685"
+  # default     = "ami-0da9ffeb885463685"  # with ca-central-1 region
 }
 
 variable "key_pair_name" {
-  description = "Name of an existing EC2 key pair for SSH access. Create one in the console first."
+  description = "Name of an existing EC2 key pair for SSH access."
   type        = string
   default     = "25phxp-keypair"
 }
 
-###############################################################################
+
 # LOCALS – central name prefix
-###############################################################################
 
 locals {
   prefix = var.net_id
@@ -102,32 +85,24 @@ locals {
   }
 }
 
-###############################################################################
 # PROVIDER
-###############################################################################
 
 provider "aws" {
-  # region = var.aws_region
-  region = "us-east-1"
-  # region = "ca-central-1"
+  region = var.aws_region
 }
 
-###############################################################################
 # DATA SOURCES
-###############################################################################
 
 # Availability zones in the chosen region
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-###############################################################################
 # SECTION 2 — VPC & NETWORKING
-###############################################################################
 
-# ── VPC ──────────────────────────────────────────────────────────────────────
-# A /16 gives us 65,536 IPs across all subnets, which is more than enough.
-# Using a custom VPC isolates our resources from other students on the account.
+# VPC 
+
+# Using a custom VPC to isolate our resources from other students on the account.
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true   # needed for S3 endpoint and EMR internal DNS
@@ -136,17 +111,17 @@ resource "aws_vpc" "main" {
   tags = merge(local.tags, { Name = "${local.prefix}-vpc" })
 }
 
-# ── Internet Gateway ──────────────────────────────────────────────────────────
-# Attaches the VPC to the internet. Without this, the public subnet is isolated.
+# Internet Gateway
+
+# Attaching the VPC to the internet. So, the public subnet isn't isolated.
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
   tags   = merge(local.tags, { Name = "${local.prefix}-igw" })
 }
 
-# ── Public Subnet (EC2 / Ollama / OpenWebUI) ─────────────────────────────────
-# /24 gives 256 IPs; plenty for the EC2 instance. Placed in AZ-a.
-# map_public_ip_on_launch = true so the instance gets a public IP automatically
-# (we also attach an Elastic IP for a stable address).
+# Public Subnet (EC2 / Ollama / OpenWebUI)
+
+# map_public_ip_on_launch = true so the instance gets a public IP automatically, we also attach an Elastic IP for a stable address.
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnet_cidr
@@ -156,7 +131,8 @@ resource "aws_subnet" "public" {
   tags = merge(local.tags, { Name = "${local.prefix}-subnet-public" })
 }
 
-# ── EMR Subnet ───────────────────────────────────────────────────────────────
+# EMR Subnet
+
 # Separate /24 subnet for the EMR cluster for isolation.
 # EMR needs internet access to download packages, so it also uses the IGW.
 resource "aws_subnet" "emr" {
@@ -168,7 +144,8 @@ resource "aws_subnet" "emr" {
   tags = merge(local.tags, { Name = "${local.prefix}-subnet-emr" })
 }
 
-# ── Route Table (shared public) ───────────────────────────────────────────────
+# Route Table (shared public)
+
 # Default route sends all non-local traffic out through the IGW.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -188,13 +165,12 @@ resource "aws_route_table_association" "public" {
 }
 
 # Associate the same route table with the EMR subnet
-# (EMR needs internet access to pull packages and write to S3)
 resource "aws_route_table_association" "emr" {
   subnet_id      = aws_subnet.emr.id
   route_table_id = aws_route_table.public.id
 }
 
-# ── S3 Gateway Endpoint ───────────────────────────────────────────────────────
+# S3 Gateway Endpoint
 # Allows EMR to talk to S3 without going over the public internet.
 # This is faster, cheaper (no data transfer cost), and more secure.
 resource "aws_vpc_endpoint" "s3" {
@@ -206,28 +182,25 @@ resource "aws_vpc_endpoint" "s3" {
   tags = merge(local.tags, { Name = "${local.prefix}-s3-endpoint" })
 }
 
-###############################################################################
 # SECURITY GROUPS
-###############################################################################
 
-# ── EC2 Security Group ────────────────────────────────────────────────────────
-# Only SSH is restricted to your IP. OpenWebUI (3000) and Ollama (11434) are
-# opened to the world so the grader can access them.
+# EC2 Security Group
+# Only SSH is restricted to our IP. OpenWebUI (3000) and Ollama (11434) are opened so anyone can access them.
 resource "aws_security_group" "ec2" {
   name        = "${local.prefix}-sg-ec2"
   description = "Security group for EC2 instance running Ollama + OpenWebUI"
   vpc_id      = aws_vpc.main.id
 
-  # SSH – your IP only to prevent brute-force attacks
+  # SSH, Our IP only to prevent brute-force attacks
   ingress {
-    description = "SSH from your IP"
+    description = "SSH from our IP"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.my_ip]
   }
 
-  # OpenWebUI – public so grader can access the chat interface
+  # OpenWebUI – public so anyone can access the chat interface
   ingress {
     description = "OpenWebUI chat interface"
     from_port   = 3000
@@ -236,7 +209,7 @@ resource "aws_security_group" "ec2" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Ollama API – open for curl demo and grading
+  # Ollama API – open for curl demo
   ingress {
     description = "Ollama LLM API"
     from_port   = 11434
@@ -257,7 +230,7 @@ resource "aws_security_group" "ec2" {
   tags = merge(local.tags, { Name = "${local.prefix}-sg-ec2" })
 }
 
-# ── EMR Security Group ────────────────────────────────────────────────────────
+# EMR Security Group
 resource "aws_security_group" "emr_primary" {
   name        = "${local.prefix}-sg-emr-primary"
   description = "SG for EMR primary node"
@@ -300,8 +273,7 @@ resource "aws_security_group" "emr_core" {
   tags = merge(local.tags, { Name = "${local.prefix}-sg-emr-core" })
 }
 
-# Self-referencing rules for intra-cluster EMR communication
-# (primary ↔ core traffic on all ports)
+# Self-referencing rules for intra-cluster EMR communication, primary and core traffic on all ports
 resource "aws_security_group_rule" "emr_primary_self" {
   type                     = "ingress"
   from_port                = 0
@@ -332,19 +304,16 @@ resource "aws_security_group_rule" "emr_primary_from_core" {
   description              = "Intra-cluster: core to primary"
 }
 
-###############################################################################
-# SECTION 4 — S3 BUCKET (dataset + preprocessed output storage)
-###############################################################################
+# SECTION 4 — S3 Bucket (dataset + preprocessed output storage)
 
 resource "aws_s3_bucket" "project" {
-  # Bucket names must be globally unique; netID prefix helps ensure that
   bucket        = "${local.prefix}-cisc886-bucket-v01"
-  force_destroy = true   # allows `terraform destroy` to delete non-empty bucket
+  force_destroy = true  
 
   tags = merge(local.tags, { Name = "${local.prefix}-cisc886-bucket" })
 }
 
-# Block all public access – dataset and model files should not be public
+# Block all public access, as dataset and model files should not be public
 resource "aws_s3_bucket_public_access_block" "project" {
   bucket                  = aws_s3_bucket.project.id
   block_public_acls       = true
@@ -353,7 +322,7 @@ resource "aws_s3_bucket_public_access_block" "project" {
   restrict_public_buckets = true
 }
 
-# Folder structure (S3 "directories" via zero-byte objects)
+# Folder structure 
 resource "aws_s3_object" "raw_prefix" {
   bucket  = aws_s3_bucket.project.id
   key     = "data/raw/"
@@ -362,7 +331,7 @@ resource "aws_s3_object" "raw_prefix" {
 
 resource "aws_s3_object" "processed_prefix" {
   bucket  = aws_s3_bucket.project.id
-  key     = "data/processed/"
+  key     = "data/output/"
   content = ""
 }
 
@@ -372,12 +341,10 @@ resource "aws_s3_object" "models_prefix" {
   content = ""
 }
 
-###############################################################################
-# SECTION 2 & 4 — IAM ROLES (EC2 + EMR)
-###############################################################################
+# IAM Roles (EC2 + EMR)
 
-# ── EC2 Instance Profile ──────────────────────────────────────────────────────
-# Allows EC2 to access S3 without baking credentials into the instance.
+# EC2 Instance Profile 
+# Allows EC2 to access S3
 data "aws_iam_policy_document" "ec2_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -404,7 +371,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
   role = aws_iam_role.ec2_role.name
 }
 
-# ── EMR Service Role ──────────────────────────────────────────────────────────
+# EMR Service Role
 data "aws_iam_policy_document" "emr_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -426,7 +393,7 @@ resource "aws_iam_role_policy_attachment" "emr_service" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceRole"
 }
 
-# ── EMR EC2 Profile (for YARN / nodes) ───────────────────────────────────────
+# EMR EC2 Profile (YARN and nodes)
 data "aws_iam_policy_document" "emr_ec2_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -453,11 +420,9 @@ resource "aws_iam_instance_profile" "emr_ec2_profile" {
   role = aws_iam_role.emr_ec2_role.name
 }
 
-###############################################################################
-# SECTION 6 — EC2 INSTANCE (LLM Deployment)
-###############################################################################
+# SECTION 5 — EC2 Instance (LLM Deployment)
 
-# Elastic IP for a stable public address (survives stop/start)
+# Elastic IP for a stable public address
 resource "aws_eip" "ec2" {
   domain = "vpc"
   tags   = merge(local.tags, { Name = "${local.prefix}-eip" })
@@ -514,7 +479,7 @@ resource "aws_instance" "ec2" {
   key_name                    = var.key_pair_name != "" ? var.key_pair_name : null
   associate_public_ip_address = true
 
-  # Root volume: 100 GB to store base model + fine-tuned GGUF
+  # Root volume
   root_block_device {
     volume_size           = 100
     volume_type           = "gp3"
@@ -532,9 +497,7 @@ resource "aws_eip_association" "ec2" {
   allocation_id = aws_eip.ec2.id
 }
 
-###############################################################################
-# OUTPUTS
-###############################################################################
+# OUTPUTS (to ensure resources successful creatiion )
 
 output "vpc_id" {
   description = "VPC ID"
@@ -601,9 +564,7 @@ output "ollama_api_url" {
   value       = "http://${aws_eip.ec2.public_ip}:11434"
 }
 
-###############################################################################
-# NEW EMR CLUSTER SECTION 
-###############################################################################
+# New EMR Cluster
 
 resource "aws_emr_cluster" "cluster" {
   name           = "${local.prefix}-emr-cluster"
